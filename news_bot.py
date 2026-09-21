@@ -13,63 +13,87 @@ TZ = ZoneInfo("Europe/Paris")
 CALENDAR_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 
 RSS_FEEDS = {
-    "CNBC Économie": "https://www.cnbc.com/id/20910258/device/rss/rss.html",
+    "CNBC": "https://www.cnbc.com/id/20910258/device/rss/rss.html",
     "MarketWatch": "https://feeds.content.dowjones.io/public/rss/mw_topstories",
+    "Investing.com": "https://www.investing.com/rss/news_1.rss",
 }
 NEWS_PER_FEED = 5
-IMPACTS = {"High": "🔴", "Medium": "🟠"}
+
+# Couleurs comme ForexFactory : rouge = fort, orange = moyen,
+# jaune = faible, gris = non economique
+COLORS = {
+    "High": "\U0001F534",
+    "Medium": "\U0001F7E0",
+    "Low": "\U0001F7E1",
+    "Holiday": "\u26AA",
+}
 
 
-def get_calendar() -> str:
+def get_calendar():
     today = datetime.now(TZ).date()
-    events = requests.get(CALENDAR_URL, timeout=15).json()
+    out = ["\U0001F4C5 <b>Calendrier \u00e9co du " + today.strftime("%d/%m/%Y") + "</b>"]
+    out.append(
+        "\U0001F534 fort  \U0001F7E0 moyen  \U0001F7E1 faible  \u26AA non \u00e9conomique"
+    )
+    try:
+        events = requests.get(CALENDAR_URL, timeout=15).json()
+    except Exception:
+        out.append("Calendrier indisponible pour le moment.")
+        return "\n".join(out)
+
     lines = []
     for e in events:
-        if e.get("impact") not in IMPACTS:
+        impact = e.get("impact")
+        if impact not in COLORS:
             continue
         dt = datetime.fromisoformat(e["date"]).astimezone(TZ)
         if dt.date() != today:
             continue
-        lines.append((dt, e))
+        lines.append((dt, impact, e))
     lines.sort(key=lambda x: x[0])
 
-    out = [f"📅 <b>Calendrier éco du {today:%d/%m/%Y}</b>"]
     if not lines:
-        out.append("Aucun événement important aujourd'hui.")
-    for dt, e in lines:
+        out.append("Aucun \u00e9v\u00e9nement aujourd'hui.")
+    for dt, impact, e in lines:
         extra = []
         if e.get("forecast"):
-            extra.append(f"prév. {e['forecast']}")
+            extra.append("pr\u00e9v. " + e["forecast"])
         if e.get("previous"):
-            extra.append(f"préc. {e['previous']}")
-        extra_txt = f" ({', '.join(extra)})" if extra else ""
+            extra.append("pr\u00e9c. " + e["previous"])
+        extra_txt = " (" + ", ".join(extra) + ")" if extra else ""
         out.append(
-            f"{IMPACTS[e['impact']]} {dt:%H:%M} <b>{html.escape(e['country'])}</b> "
-            f"– {html.escape(e['title'])}{html.escape(extra_txt)}"
+            COLORS[impact]
+            + " "
+            + dt.strftime("%H:%M")
+            + " <b>"
+            + html.escape(e["country"])
+            + "</b> \u2013 "
+            + html.escape(e["title"])
+            + html.escape(extra_txt)
         )
     return "\n".join(out)
 
 
-def get_news() -> str:
-    out = ["📰 <b>Actus financières</b>"]
+def get_news():
+    out = ["\U0001F4F0 <b>Actus financi\u00e8res</b>"]
     headers = {"User-Agent": "Mozilla/5.0"}
     for name, url in RSS_FEEDS.items():
         try:
             r = requests.get(url, headers=headers, timeout=15)
             root = ET.fromstring(r.content)
             items = root.findall(".//item")[:NEWS_PER_FEED]
-        except Exception as ex:
-            out.append(f"\n<i>{name} : indisponible ({ex})</i>")
+        except Exception:
+            out.append("\n<i>" + html.escape(name) + " : indisponible</i>")
             continue
-        out.append(f"\n<b>{html.escape(name)}</b>")
+        out.append("\n<b>" + html.escape(name) + "</b>")
         for it in items:
             title = html.escape((it.findtext("title") or "").strip())
-            link = (it.findtext("link") or "").strip()
-            out.append(f'• <a href="{html.escape(link)}">{title}</a>')
+            link = html.escape((it.findtext("link") or "").strip())
+            out.append('\u2022 <a href="' + link + '">' + title + "</a>")
     return "\n".join(out)
 
 
-def send(text: str) -> None:
+def send(text):
     chunks, current = [], ""
     for line in text.split("\n"):
         if len(current) + len(line) + 1 > 3800:
@@ -81,7 +105,7 @@ def send(text: str) -> None:
 
     for chunk in chunks:
         r = requests.post(
-            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+            "https://api.telegram.org/bot" + TOKEN + "/sendMessage",
             data={
                 "chat_id": CHAT_ID,
                 "text": chunk,
